@@ -44,8 +44,7 @@ cces <- cces %>%
 
 cces_2_party <- cces %>% filter(pid_lean %in% c("Republican","Democrat"))
 
-#Need to get confidence interval for proprotion, this isn't right....
-#Want to do them with the survey weights
+
 cces_2_party_weights <- cces_2_party %>% 
   as_survey_design(weights = weight)
 
@@ -70,7 +69,7 @@ health_party_long_se <- health_party_long %>%
 
 
 health_party_long <- left_join(health_party_long_mean,health_party_long_se)
-health_party_long
+
 health_party_long <- health_party_long %>% 
   mutate(name=str_replace_all(name, "_","\n"),
          name=str_to_title(name),
@@ -79,9 +78,7 @@ health_party_long <- health_party_long %>%
   filter(!name %in% c("Exercise","Alcohol", "General\nHealth", "Healthy\nDiet"))
 
 
-
-#Need to get rid of general health of plot it separately
-#Maybe make some of these name cols 2 rows
+#Health party graph
 
 health_party_graph <- ggplot(data=health_party_long, aes(x=name, y=value, ymin=ci_min, ymax=ci_max, fill=pid_lean)) +
   geom_bar(stat="identity", position=position_dodge(), width=0.5)+
@@ -108,18 +105,21 @@ dev.off()
 
 
 #Want to do a regression with covariates and then graph gaps
+
+#Covariates
 covariate_sets <- list(
   "none" = c(),
   "age" = c("age"),
   "all" = c("age", "race", "gender","faminc","educ","employ","inputstate")
 )
-
+#Function for lm_robust later
 run_lm_robust <- function(dv_name, treatment_name, covariate_set_name, weight_var_name, dataset_name){
   rhs <- paste(c(treatment_name, covariate_sets[[covariate_set_name]]), collapse = " + ")
   form <- as.formula(glue("{dv_name} ~ {rhs}"))
   lm_robust(form, weights = get(weight_var_name), data = get(dataset_name))
 }
 
+#Do all the model variations
 model_df <- expand_grid(dv_name = c("high_blood_pressure",
                                     "high_cholestoral","heart_disese","diabetes",
                                     "asthma","smoker"), 
@@ -128,12 +128,13 @@ model_df <- expand_grid(dv_name = c("high_blood_pressure",
                         weight_var_name = c("weight"), 
                         dataset_name = "cces_2_party")
 
+#Run the models and clean them up
 results <- model_df %>% 
   mutate(model = pmap(., run_lm_robust),
          tidy_coefs = map(model, tidy)) %>% 
   unnest(cols = tidy_coefs)  %>% filter(term=="pid_leanRepublican")
 
-
+#Further cleaning of the names, prepping for graphing
 results_clean <- results %>% mutate(dv_name=str_replace_all(dv_name, "_","\n"),
                               dv_name=str_to_title(dv_name),
                               ub=estimate+(1.96*std.error),
@@ -173,11 +174,11 @@ health_covariate_adjusted
 dev.off()
 
 
-
+#Want to specifically hilight health conditional on age with some nice graphs
 age_health <- cces_2_party %>% group_by(age,pid_lean) %>% 
   summarise(across(c(general_health:exercise), ~mean(.x, na.rm=TRUE))) 
 
-
+#Esample graph, want to do it with all the conditions
 ggplot(age_health %>% filter(age<80), aes(x=age, y=high_blood_pressure, color=pid_lean)) +
   geom_point() +
   geom_smooth(method=loess, se=TRUE, fullrange=TRUE) +
@@ -187,8 +188,8 @@ ggplot(age_health %>% filter(age<80), aes(x=age, y=high_blood_pressure, color=pi
   scale_color_manual(values=c('#4d94ff','#cc3300')) +
   theme(legend.position = "none") 
 
-cces_2_party$pid_lean
 
+#First, graph comparing ages
 age_party <- cces %>% mutate(republican=ifelse(pid_lean=="Republican",1,0),
                              democrat=ifelse(pid_lean=="Democrat",1,0)) %>% 
   group_by(age) %>% 
@@ -212,21 +213,6 @@ age_party_graph <- ggplot(age_party_long %>% filter(age<80), aes(x=age, y=value,
         legend.position = "none", plot.title = element_text(hjust = 0.5))
 age_party_graph
 
-#Old one just republicans
-# age_party <- ggplot(age_party %>% filter(age<80), aes(x=age, y=value)) +
-#   geom_point(colour = "red", alpha = 0.5) +
-#   geom_smooth(method=loess, se=TRUE, fullrange=TRUE, color = "red", fill = "white") + #Color red
-#   labs(title="Republican Partisanship By Age",
-#        x="\nAge", y="Percentage\nRepublicans\n") +
-#   theme_jack() +
-#   scale_y_continuous(limits = c(.2, .6), breaks = seq(from = .2, to = .6, by = .05),
-#                      labels = scales::percent_format(accuracy=1)) +
-#   scale_color_manual(values=c("red")) +
-#   theme(axis.title.y = element_text(angle = 0, vjust = 0.5, size=10, 
-#                                     margin = margin(t = 0, r = 20, b = 0, l = 0)), 
-#         axis.title.x = element_text(size=10),
-#         legend.position = "none", plot.title = element_text(hjust = 0.5))
-# age_party
 
 png(filename = "/Users/jacklandry/Documents/GitHub/health_partisanship/figures/age_party.png", 
     width=7, height=4, units="in", res=1000)
@@ -234,8 +220,7 @@ age_party_graph
 dev.off()
 
 
-
-
+#Making a function to do a graph by age
 graph_func <- function(d_var,d_title,title) {
   d_var <- enquo(d_var)
   ggplot(age_health %>% filter(age<80), aes(x=age, y= !! d_var, color=pid_lean)) +
@@ -252,9 +237,8 @@ graph_func <- function(d_var,d_title,title) {
 #Maybe just a title?
 high_blood_pressure <- graph_func(high_blood_pressure,"Percentage\nwith\nHigh\nBlood\nPressure\n","High Blood Pressure") #this does work
 
-# "Asthma","Diabetes","High Blood\nPressure",
-# "High Cholesterol", "Heart Disease", "Smoker", "Exercise", "General Health"
-asthma <- graph_func(asthma,"","Asthma") #this does work
+
+asthma <- graph_func(asthma,"","Asthma") #Have to do them individually to get the names nice
 diabetes <- graph_func(diabetes,"","Diabetes")
 high_blood_pressure  <- graph_func(high_blood_pressure,"","High Blood Pressure")
 high_cholestoral <- graph_func(high_cholestoral,"","High Cholesterol")
@@ -262,14 +246,13 @@ heart_disese <- graph_func(heart_disese,"","Heart Disease")
 smoker <- graph_func(smoker,"","Smoker")
 exercise <- graph_func(exercise,"","Exercise")
 general_health <- graph_func(general_health,"","General Health")
+
+#Combinings step 1
 age_health_figure <- ggarrange(asthma, diabetes,high_blood_pressure,
                     high_cholestoral,heart_disese,smoker,
                     ncol = 3, nrow =2)
 
-names(age_health)
-
-
-
+#Combinings step 2 with the axis labels
 age_health_final_figure <- annotate_figure(age_health_figure,
                 top = text_grob("\nHealth Conditions by Party and Age\n", size = 20, family="Cairo"),
                 bottom = text_grob("Age\n", family="Cairo"),
@@ -326,7 +309,7 @@ diff_results_long <- pivot_longer(diff_results, cols=r_estimate:d_estimate)
 #        Full Set of Covarites include age, gender, race, education, family income, employment status, and state of residence") +
 #   theme(axis.title.y = element_text(angle = 0, vjust = 0.5, size=10), axis.text.x = element_text(size=10))
 
-#Think I want to add a title here
+#General health penelty by condition R-Ds
 general_health_penalty <- ggplot(data=diff_results_long, aes(x=term, y=value, fill=name)) +
   geom_bar(stat="identity", position=position_dodge(), width=0.5)+
   labs(title="\nGeneral Health Penalty For Different\nHealth Conditions By Party",
@@ -345,7 +328,7 @@ dev.off()
 
 general_health_penalty
 
-#####General Health
+#####General Health Graph
 health_party_long <- left_join(health_party_long_mean,health_party_long_se)
 
 general_health <- health_party_long %>% 
@@ -358,7 +341,7 @@ general_health <- health_party_long %>%
 
 
 #Maybe Add a title here rather than the bottom label
-#Want to directly label democrat and replican
+#Want to directly label democrat and republican
 
 
 general_health_mod <- general_health %>% mutate(name=ifelse(pid_lean=="Democrat","Democrat","Republican"))
